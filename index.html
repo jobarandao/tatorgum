@@ -154,7 +154,7 @@ const MOIS_C = ["Janv.","Févr.","Mars","Avr.","Mai","Juin","Juil.","Août","Sep
 const INI = ["J","F","M","A","M","J","J","A","S","O","N","D"];
 const PAYS = {"Afrique du Sud":"+27","Algérie":"+213","Allemagne":"+49","Belgique":"+32","Bénin":"+229","Brésil":"+55","Burkina Faso":"+226","Burundi":"+257","Cameroun":"+237","Canada":"+1","Centrafrique":"+236","Chine":"+86","Comores":"+269","Congo":"+242","Côte d'Ivoire":"+225","Djibouti":"+253","Émirats arabes unis":"+971","Espagne":"+34","États-Unis":"+1","France":"+33","Gabon":"+241","Ghana":"+233","Guinée":"+224","Guinée équatoriale":"+240","Haïti":"+509","Irlande":"+353","Italie":"+39","Luxembourg":"+352","Madagascar":"+261","Mali":"+223","Maroc":"+212","Mauritanie":"+222","Niger":"+227","Nigeria":"+234","Pays-Bas":"+31","Portugal":"+351","RD Congo":"+243","Royaume-Uni":"+44","Rwanda":"+250","Sénégal":"+221","Suisse":"+41","Tchad":"+235","Togo":"+228","Tunisie":"+216"};
 const DEV = {"États-Unis":"$","Togo":"FCFA"};
-const DEF = {tarifs:{etu:{eur:10,usd:10,xof:5000},non:{eur:20,usd:20,xof:10000}},tauxUSD:585};
+const DEF = {tarifs:{etu:{eur:10,usd:10,xof:5000},non:{eur:20,usd:20,xof:10000}},tauxUSD:585,debut:""};
 const TPL = {sujet:"Ta'Torgum Solidarity – suivi des cotisations", corps:"Bonjour {prenom},\n\nVous pouvez consulter à tout moment le suivi des cotisations de Ta'Torgum Solidarity, mois par mois, sur ce lien :\n{lien}\n\nAucun compte n'est nécessaire.\n\nEnsemble, solidaires !\nLe bureau de Ta'Torgum Solidarity"};
 const nf = new Intl.NumberFormat("fr-FR",{maximumFractionDigits:2});
 const nf0 = new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0});
@@ -180,11 +180,15 @@ const pays = m => (m.pay && m.pay[year]) || Array(12).fill(null);
 const money = (v,cur) => cur === "FCFA" ? nf0.format(Math.round(v)) + " FCFA" : nf.format(v) + " " + cur;
 const intl = m => { const t = (m.tel||"").trim(); if(!t) return ""; if(t.startsWith("+")) return t; const i = PAYS[m.pays] || ""; return i ? i + " " + t.replace(/^0/,"") : t; };
 const fullName = m => `${m.prenom||""} ${m.nom||""}`.trim();
+const MOIS_L = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+const fmtMois = ym => ym ? MOIS_L[Number(ym.slice(5,7))-1] + " " + ym.slice(0,4) : "";
+// Premier mois dû (0 à 11) pour l'année affichée ; 12 = rien de dû cette année.
+const debutDe = m => { const s = [cfg.debut||"", m.depuis||""].sort().pop(); if(!s) return 0; const y = Number(s.slice(0,4)); return y > year ? 12 : y < year ? 0 : Number(s.slice(5,7))-1; };
 function calc(m){
-  const t = tarif(m), cur = devise(m), p = pays(m), M = moisEcoules(), actif = m.statut !== "Inactif";
-  const verse = p.reduce((s,v)=>s+(Number(v)||0),0), du = actif ? t*M : 0, reste = du - verse;
-  const st = p.map((v,i)=>{ v = Number(v)||0; if(t>0 && v>=t) return "ok"; if(v>0) return "part"; return actif && i<M ? "late" : ""; });
-  return {t,cur,verse,du,reste,st,actif,ok: reste<=0};
+  const t = tarif(m), cur = devise(m), p = pays(m), M = moisEcoules(), actif = m.statut !== "Inactif", f = debutDe(m);
+  const nbDus = Math.max(0, M - f), verse = p.reduce((s,v)=>s+(Number(v)||0),0), du = actif ? t*nbDus : 0, reste = du - verse;
+  const st = p.map((v,i)=>{ v = Number(v)||0; if(t>0 && v>=t) return "ok"; if(v>0) return "part"; return actif && i>=f && i<M ? "late" : ""; });
+  return {t,cur,verse,du,reste,st,actif,f,nbDus,ok: reste<=0};
 }
 function totals(){
   const T = {"€":{du:0,v:0,r:0},"$":{du:0,v:0,r:0},"FCFA":{du:0,v:0,r:0},etu:0,non:0,late:0,okN:0,mAtt:Array(12).fill(0),mEnc:Array(12).fill(0)};
@@ -192,13 +196,13 @@ function totals(){
     const c = calc(m), k = T[c.cur];
     k.du += c.du; k.v += c.verse; if(c.reste>0) k.r += c.reste;
     if(c.actif){ m.categorie==="Non étudiant" ? T.non++ : T.etu++; c.ok ? T.okN++ : T.late++; }
-    pays(m).forEach((v,i)=>{ T.mEnc[i] += toX(Number(v)||0,c.cur); if(c.actif) T.mAtt[i] += toX(c.t,c.cur); });
+    pays(m).forEach((v,i)=>{ T.mEnc[i] += toX(Number(v)||0,c.cur); if(c.actif && i>=c.f) T.mAtt[i] += toX(c.t,c.cur); });
   }
   const X = k => ["€","$","FCFA"].reduce((s,c)=>s+toX(T[c][k],c),0); T.xDu = X("du"); T.xV = X("v"); T.xR = X("r");
   return T;
 }
 const merge = () => { membres = raw.map(m=>({...m,...(contacts[m.id]||{})})).sort((a,b)=>(a.nom||"").localeCompare(b.nom||"","fr")||(a.prenom||"").localeCompare(b.prenom||"","fr")); };
-const cfgFrom = d => { cfg = d ? {tarifs:{etu:{...DEF.tarifs.etu,...(d.tarifs?.etu||{})},non:{...DEF.tarifs.non,...(d.tarifs?.non||{})}},tauxUSD:d.tauxUSD ?? DEF.tauxUSD} : structuredClone(DEF); };
+const cfgFrom = d => { cfg = d ? {tarifs:{etu:{...DEF.tarifs.etu,...(d.tarifs?.etu||{})},non:{...DEF.tarifs.non,...(d.tarifs?.non||{})}},tauxUSD:d.tauxUSD ?? DEF.tauxUSD, debut:d.debut || ""} : structuredClone(DEF); };
 
 /* ---------- navigation ---------- */
 const ICON = {
@@ -280,7 +284,7 @@ function vAccueilCotis(){
     <div class="big num">${money(T.xV,"FCFA")}</div>
     <div class="split"><span><b>${money(T["€"].v,"€")}</b> en euros</span><span><b>${money(T["$"].v,"$")}</b> en dollars</span><span><b>${money(T["FCFA"].v,"FCFA")}</b> en francs CFA</span></div>
     <div class="bar" role="img" aria-label="Taux de recouvrement ${Math.round(taux)} %"><i style="width:${taux}%"></i></div>
-    <div class="split"><span><b>${nf0.format(taux)} %</b> des ${money(T.xDu,"FCFA")} attendus (${M} mois)</span></div>
+    <div class="split"><span><b>${nf0.format(taux)} %</b> des ${money(T.xDu,"FCFA")} attendus${cfg.debut ? ` (cotisations depuis ${fmtMois(cfg.debut)})` : ` (${M} mois)`}</span></div>
     ${isAdmin?"":`<div class="hero-cta"><a class="btn" href="#cotisations" style="display:inline-grid;place-items:center">Voir le détail</a><a class="btn sec" href="#inscription" style="display:inline-grid;place-items:center">Devenir membre</a></div>`}
   </section>
   <div class="grid3">
@@ -364,6 +368,8 @@ function vReglages(){
    <h2 style="margin-top:18px">Conversion en francs CFA</h2>
    <div class="two"><div class="f"><label>1 € = (parité fixe)</label><input value="655,957 FCFA" disabled></div>
    <div class="f"><label for="tx">1 $ = (FCFA, à mettre à jour)</label><input id="tx" type="number" min="0" step="0.01" value="${cfg.tauxUSD}"></div></div>
+   <h2 style="margin-top:18px">Début des cotisations</h2>
+   <div class="f"><label for="deb">Premier mois dû</label><input id="deb" type="month" value="${esc(cfg.debut)}"><small class="note">Les mois avant cette date ne sont jamais comptés comme dus. Chaque membre peut aussi avoir sa propre date (« Cotise à partir de » sur sa fiche).</small></div>
    <button class="btn" data-act="saveCfg">Enregistrer les réglages</button></section>
   <section class="card"><h2>Importer depuis Excel</h2><p class="note">Choisissez votre fichier de cotisations (onglets « Membres » et « Cotisations »). Les membres déjà présents, même nom et prénom, sont mis à jour, sans doublon.</p>
    <input type="file" id="xlsIn" accept=".xlsx,.xls" class="search" style="padding:10px"><p class="note" id="impMsg">${esc(impText)}</p></section>
@@ -389,6 +395,7 @@ function sheetMember(m){
    <div class="f"><label for="tel">Téléphone (sans indicatif, ou complet avec +)</label><input id="tel" inputmode="tel" value="${esc(m.tel)}"><small class="note" id="intlPrev"></small></div>
    <div class="f"><label for="email">E-mail</label><input id="email" type="email" value="${esc(m.email)}"></div>
    <label class="ck"><input type="checkbox" id="liste" ${m.liste===false?"":"checked"}> Inscrit à la liste de diffusion</label>
+   <div class="f"><label for="dep">Cotise à partir de</label><input id="dep" type="month" value="${esc(m.depuis || (m.id ? "" : nowIso().slice(0,7)))}"><small class="note">Vide = début général des cotisations${cfg.debut ? " (" + fmtMois(cfg.debut) + ")" : ""}.</small></div>
    <div class="two"><div class="f"><label for="adh">Date d'adhésion</label><input id="adh" type="date" value="${esc(m.adhesion)}"></div><div class="f"><label>Statut</label>${seg("statut",["Actif","Inactif"],m.statut)}</div></div>
    <div class="f"><label for="obs">Observations</label><textarea id="obs" rows="2">${esc(m.obs)}</textarea></div>
    <p class="note" id="tarifPrev"></p><p class="note" id="err" style="color:var(--p)"></p>
@@ -398,14 +405,14 @@ function sheetMember(m){
   f.addEventListener("input",upd); f.addEventListener("change",upd); upd();
   f.addEventListener("submit", async e => { e.preventDefault(); const x = readForm(); if(!x.nom){ $("err").textContent = "Le nom est obligatoire."; return; }
     const id = f.dataset.id, old = membres.find(z=>z.id===id);
-    const pub = {nom:x.nom,prenom:x.prenom,pays:x.pays,categorie:x.categorie,statut:x.statut,pay:old?.pay||{},cree:old?.cree||Date.now()};
+    const pub = {nom:x.nom,prenom:x.prenom,pays:x.pays,categorie:x.categorie,statut:x.statut,depuis:x.depuis,pay:old?.pay||{},cree:old?.cree||Date.now()};
     const priv = {tel:x.tel,email:x.email,adhesion:x.adhesion,obs:x.obs,liste:x.liste};
     try{ await api.saveMember(id||null,pub,priv); closeSheet(); toast(okMail(x.email)&&x.liste ? "Membre enregistré et ajouté à la liste de diffusion" : "Membre enregistré"); }
     catch(er){ $("err").textContent = errMsg(er); } });
 }
 function readForm(){
   const segv = n => $("sh").querySelector(`[data-seg="${n}"] [aria-pressed=true]`)?.dataset.v;
-  return {nom:$("nom").value.trim(),prenom:$("prenom").value.trim(),categorie:segv("categorie")||"Étudiant",statut:segv("statut")||"Actif",pays:$("pays").value,tel:$("tel").value.trim(),email:$("email").value.trim(),adhesion:$("adh").value,obs:$("obs").value.trim(),liste:$("liste").checked};
+  return {nom:$("nom").value.trim(),prenom:$("prenom").value.trim(),categorie:segv("categorie")||"Étudiant",statut:segv("statut")||"Actif",pays:$("pays").value,tel:$("tel").value.trim(),email:$("email").value.trim(),adhesion:$("adh").value,obs:$("obs").value.trim(),liste:$("liste").checked,depuis:$("dep").value||""};
 }
 function sheetPay(m){
   const c = calc(m), p = pays(m).slice(), M = moisEcoules();
@@ -420,7 +427,7 @@ function sheetPay(m){
    <p class="note" id="sumP"></p>
    <div class="acts"><button class="btn" data-act="savePay" data-id="${m.id}">Enregistrer</button><button class="btn sec" data-act="fillPay">Régler jusqu'à ${MOIS[Math.max(0,M-1)].toLowerCase()}</button><button class="btn sec" data-act="close">Fermer</button></div>`);
   const sum = () => { const v = [...$("pl").querySelectorAll("input")].reduce((s,x)=>s+(Number(x.value)||0),0); $("sumP").textContent = `Total versé : ${money(v,c.cur)} · dû à ce jour : ${money(c.du,c.cur)} · reste : ${money(c.du-v,c.cur)}`; };
-  $("pl").addEventListener("input",sum); sum(); $("sh").dataset.t = c.t;
+  $("pl").addEventListener("input",sum); sum(); $("sh").dataset.t = c.t; $("sh").dataset.f = c.f;
 }
 let actImgs = [];
 async function loadPhotos(ids){ const todo = ids.filter(id=>!photos[id] && !loadPhotos.busy.has(id)); if(!todo.length) return; todo.forEach(id=>loadPhotos.busy.add(id));
@@ -496,7 +503,7 @@ async function importXlsx(file){
     let n = 0;
     for(const it of list){
       const ex = membres.find(m=>(m.nom||"").toLowerCase()===it.pub.nom.toLowerCase() && (m.prenom||"").toLowerCase()===it.pub.prenom.toLowerCase());
-      const pub = {...it.pub, pay:{...(ex?.pay||{}), ...(it.pay?{[yr]:it.pay}:{})}, cree: ex?.cree || Date.now()+n};
+      const pub = {...it.pub, depuis: ex?.depuis || "", pay:{...(ex?.pay||{}), ...(it.pay?{[yr]:it.pay}:{})}, cree: ex?.cree || Date.now()+n};
       const priv = {...it.priv, liste: ex ? ex.liste !== false : true};
       await api.saveMember(ex?.id||null, pub, priv); n++; msg.textContent = `Import… ${n}/${list.length}`;
     }
@@ -539,15 +546,15 @@ document.addEventListener("click", async e => {
   else if(a==="pay") sheetPay(m);
   else if(a==="close") closeSheet();
   else if(a==="again"){ sent = false; render(); }
-  else if(a==="fillPay"){ const M = moisEcoules(); $("pl").querySelectorAll("input").forEach((x,i)=>{ if(i<M && x.value==="") x.value = $("sh").dataset.t; }); $("pl").dispatchEvent(new Event("input")); }
+  else if(a==="fillPay"){ const M = moisEcoules(); $("pl").querySelectorAll("input").forEach((x,i)=>{ if(i<M && i>=Number($("sh").dataset.f||0) && x.value==="") x.value = $("sh").dataset.t; }); $("pl").dispatchEvent(new Event("input")); }
   else if(a==="savePay"){ const arr = [...$("pl").querySelectorAll("input")].map(x=>x.value===""?null:Math.max(0,Number(x.value))); await api.savePay(m.id, year, arr); closeSheet(); toast("Versements enregistrés"); }
   else if(a==="delM"){ if(b.dataset.sure){ await api.delMember(m.id); closeSheet(); toast("Membre supprimé"); } else { b.dataset.sure = 1; b.textContent = "Confirmer la suppression"; } }
   else if(a==="okI"){ const d = inscr.find(x=>x.id===b.dataset.id); b.disabled = true;
-    const pub = {nom:d.nom,prenom:d.prenom,pays:d.pays,categorie:d.categorie,statut:"Actif",pay:{},cree:Date.now()}, priv = {tel:d.tel||"",email:d.email||"",adhesion:new Date().toISOString().slice(0,10),obs:d.message||"",liste:true};
+    const pub = {nom:d.nom,prenom:d.prenom,pays:d.pays,categorie:d.categorie,statut:"Actif",depuis:nowIso().slice(0,7),pay:{},cree:Date.now()}, priv = {tel:d.tel||"",email:d.email||"",adhesion:new Date().toISOString().slice(0,10),obs:d.message||"",liste:true};
     await api.saveMember(null,pub,priv); await api.delInscr(d.id); toast("Inscription validée"); if(okMail(d.email)) sheetWelcome({...pub,...priv}); }
   else if(a==="noI"){ if(b.dataset.sure){ await api.delInscr(b.dataset.id); toast("Demande refusée"); } else { b.dataset.sure = 1; b.textContent = "Confirmer le refus"; } }
   else if(a==="saveCfg"){ const n = id => Math.max(0,Number($(id).value)||0);
-    await api.saveCfg({tarifs:{etu:{eur:n("te1"),usd:n("tu1"),xof:n("tx1")},non:{eur:n("te2"),usd:n("tu2"),xof:n("tx2")}},tauxUSD:n("tx")}); toast("Réglages enregistrés"); }
+    await api.saveCfg({tarifs:{etu:{eur:n("te1"),usd:n("tu1"),xof:n("tx1")},non:{eur:n("te2"),usd:n("tu2"),xof:n("tx2")}},tauxUSD:n("tx"), debut:$("deb").value || ""}); toast("Réglages enregistrés"); }
   else if(a==="saveTpl"){ await api.saveTpl({sujet:mail.sujet,corps:mail.corps}); toast("Modèle enregistré"); }
   else if(a==="mailto"||a==="gmail"){ const L = membres.filter(x=>okMail(x.email)), dest = mail.mode==="liste" ? L.filter(x=>x.liste!==false) : L.filter(x=>mail.sel.has(x.id)); const p = mailParts(dest);
     if(a==="gmail") window.open(p.gmail,"_blank","noopener"); else location.href = p.mailto; }
