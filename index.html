@@ -89,7 +89,9 @@ nav a.on{color:var(--gd);border-top-color:var(--g)}
 .f input,.f select,.f textarea{min-height:46px;border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:var(--bg);font-size:16px}
 .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
 .seg{display:flex;gap:6px}.seg button{flex:1}
-.pm{display:grid;grid-template-columns:7em minmax(0,1fr) auto;gap:8px;align-items:center;margin-bottom:6px}
+.pm{display:grid;grid-template-columns:4.6em minmax(0,1fr) auto auto;gap:6px;align-items:center;margin-bottom:6px}.pm .rt{display:flex;align-items:center;gap:4px;font-size:13px;font-weight:700;color:var(--p);min-height:44px}.pm .rt input{width:20px;height:20px;accent-color:var(--p)}
+.s-ret{box-shadow:inset 0 0 0 2px var(--p)}
+.intro{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}.intro img{width:110px;height:110px;border-radius:50%;background:#fff;border:1px solid var(--line)}.intro p{margin:0;max-width:56ch;white-space:pre-line}
 .pm input{min-height:44px;border:1px solid var(--line);border-radius:10px;padding:0 10px;background:var(--bg);font-size:16px;text-align:right}
 .pm b{font-weight:700}
 .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.acts .btn{flex:1 1 140px}
@@ -188,7 +190,8 @@ function calc(m){
   const t = tarif(m), cur = devise(m), p = pays(m), M = moisEcoules(), actif = m.statut !== "Inactif", f = debutDe(m);
   const nbDus = Math.max(0, M - f), verse = p.reduce((s,v)=>s+(Number(v)||0),0), du = actif ? t*nbDus : 0, reste = du - verse;
   const st = p.map((v,i)=>{ v = Number(v)||0; if(t>0 && v>=t) return "ok"; if(v>0) return "part"; return actif && i>=f && i<M ? "late" : ""; });
-  return {t,cur,verse,du,reste,st,actif,f,nbDus,ok: reste<=0};
+  const rt = ((m.retard && m.retard[year]) || []).map((x,i)=>!!x && !!st[i]), nRet = rt.filter(Boolean).length;
+  return {t,cur,verse,du,reste,st,rt,nRet,actif,f,nbDus,ok: reste<=0};
 }
 function totals(){
   const T = {"€":{du:0,v:0,r:0},"$":{du:0,v:0,r:0},"FCFA":{du:0,v:0,r:0},etu:0,non:0,late:0,okN:0,mAtt:Array(12).fill(0),mEnc:Array(12).fill(0)};
@@ -202,7 +205,7 @@ function totals(){
   return T;
 }
 const merge = () => { membres = raw.map(m=>({...m,...(contacts[m.id]||{})})).sort((a,b)=>(a.nom||"").localeCompare(b.nom||"","fr")||(a.prenom||"").localeCompare(b.prenom||"","fr")); };
-const cfgFrom = d => { cfg = d ? {tarifs:{etu:{...DEF.tarifs.etu,...(d.tarifs?.etu||{})},non:{...DEF.tarifs.non,...(d.tarifs?.non||{})}},tauxUSD:d.tauxUSD ?? DEF.tauxUSD, debut:d.debut || ""} : structuredClone(DEF); };
+const cfgFrom = d => { cfg = d ? {tarifs:{etu:{...DEF.tarifs.etu,...(d.tarifs?.etu||{})},non:{...DEF.tarifs.non,...(d.tarifs?.non||{})}},tauxUSD:d.tauxUSD ?? DEF.tauxUSD, debut:d.debut || "", presentation:d.presentation || ""} : structuredClone(DEF); };
 
 /* ---------- navigation ---------- */
 const ICON = {
@@ -270,12 +273,15 @@ function vActus(){
   <h2 class="sec-t">${up.length?"Actualités":"Actualités et activités"}</h2>
   ${f.length ? f.map(a=>postHtml(a)).join("") : `<div class="card empty">Aucune actualité pour le moment.${isAdmin?"":" Revenez bientôt !"}</div>`}`;
 }
+const PRES = "Ta'Torgum Solidarity réunit ses membres autour d'un objectif simple : promouvoir la solidarité, ici et au pays.\nEnsemble, nous menons des actions concrètes pour celles et ceux qui en ont besoin.";
 function vAccueil(){
-  const nx = upcoming()[0], la = fil()[0];
-  const top = nx ? postHtml(nx,true,"Prochaine activité") : la ? postHtml(la,true,"Dernière actualité") : "";
-  return top + vAccueilCotis();
+  const nx = upcoming()[0], la = fil().find(a=>a!==nx), nb = membres.filter(m=>m.statut!=="Inactif").length;
+  return `<section class="card intro"><img src="${document.querySelector(".logo").src}" alt="Logo Ta'Torgum Solidarity"><h2 style="margin:4px 0 0">Ta'Torgum Solidarity</h2>
+    <p>${esc(cfg.presentation || PRES)}</p>${nb?`<div class="meta" style="color:var(--mut);font-weight:700">${nb} membre${nb>1?"s":""} actif${nb>1?"s":""}</div>`:""}
+    <div class="hero-cta" style="justify-content:center">${isAdmin?`<a class="btn sec" href="#reglages" style="display:inline-grid;place-items:center">Modifier la présentation</a>`:`<a class="btn" href="#inscription" style="display:inline-grid;place-items:center">Devenir membre</a>`}<a class="btn sec" href="#actus" style="display:inline-grid;place-items:center">Nos actualités</a></div></section>
+  ${nx ? postHtml(nx,true,"Prochaine activité") : ""}${la ? postHtml(la,true,"Dernière actualité") : ""}`;
 }
-function vAccueilCotis(){
+function vResume(){
   const T = totals(), taux = T.xDu ? Math.min(100, T.xV/T.xDu*100) : 0, M = moisEcoules(), max = Math.max(1,...T.mAtt,...T.mEnc);
   if(!membres.length) return `<div class="card empty"><h2>Bienvenue</h2><p>Aucun membre enregistré pour l'instant.</p>${isAdmin?`<a class="btn" href="#reglages" style="display:inline-grid;place-items:center">Importer depuis Excel</a>`:`<a class="btn" href="#inscription" style="display:inline-grid;place-items:center">S'inscrire</a>`}</div>`;
   const late = isAdmin ? membres.map(m=>({m,c:calc(m)})).filter(x=>x.c.actif && x.c.reste>0).sort((a,b)=>toX(b.c.reste,b.c.cur)-toX(a.c.reste,a.c.cur)).slice(0,6) : [];
@@ -285,7 +291,6 @@ function vAccueilCotis(){
     <div class="split"><span><b>${money(T["€"].v,"€")}</b> en euros</span><span><b>${money(T["$"].v,"$")}</b> en dollars</span><span><b>${money(T["FCFA"].v,"FCFA")}</b> en francs CFA</span></div>
     <div class="bar" role="img" aria-label="Taux de recouvrement ${Math.round(taux)} %"><i style="width:${taux}%"></i></div>
     <div class="split"><span><b>${nf0.format(taux)} %</b> des ${money(T.xDu,"FCFA")} attendus${cfg.debut ? ` (cotisations depuis ${fmtMois(cfg.debut)})` : ` (${M} mois)`}</span></div>
-    ${isAdmin?"":`<div class="hero-cta"><a class="btn" href="#cotisations" style="display:inline-grid;place-items:center">Voir le détail</a><a class="btn sec" href="#inscription" style="display:inline-grid;place-items:center">Devenir membre</a></div>`}
   </section>
   <div class="grid3">
     <div class="stat"><small>Reste à percevoir</small><div class="num" style="color:var(--p)">${money(T.xR,"FCFA")}</div><small>${money(T["€"].r,"€")} · ${money(T["$"].r,"$")} · ${money(T["FCFA"].r,"FCFA")}</small></div>
@@ -293,7 +298,7 @@ function vAccueilCotis(){
     <div class="stat"><small>À jour / en retard</small><div class="num"><span style="color:var(--gd)">${T.okN}</span> / <span style="color:var(--p)">${T.late}</span></div><small>membres actifs</small></div>
   </div>
   <section class="card"><h2>Mois par mois</h2>
-    <div class="months">${T.mAtt.map((a,i)=>`<div class="col" title="${MOIS[i]} : ${money(T.mEnc[i],"FCFA")} sur ${money(a,"FCFA")}"><div class="trk${i===M-1?" cur":""}" style="flex:none;height:${Math.max(6,a/max*100)}%"><i style="height:${a?Math.min(100,T.mEnc[i]/a*100):0}%"></i></div><span>${INI[i]}</span></div>`).join("")}</div>
+    <div class="months">${T.mAtt.map((a,i)=>`<div class="col" title="${MOIS[i]} : ${money(T.mEnc[i],"FCFA")} sur ${money(a,"FCFA")}"><div class="trk${i===M-1?" cur":""}" style="flex:none;height:${Math.max(6,a/max*86)}%"><i style="height:${a?Math.min(100,T.mEnc[i]/a*100):0}%"></i></div><span>${INI[i]}</span></div>`).join("")}</div>
     <div class="legend">Colonne grise : attendu du mois · vert : encaissé (tout converti en FCFA ; 1 € = 655,957 FCFA, 1 $ = ${nf.format(cfg.tauxUSD)} FCFA)</div>
   </section>
   ${late.length?`<section class="card"><h2>À relancer</h2><div class="list">${late.map(({m,c})=>`<button class="row" data-act="pay" data-id="${m.id}"><span class="who"><b>${esc(fullName(m))}</b><small>${esc(intl(m)||m.pays||"")}</small></span><span class="amt" style="color:var(--p)">${money(c.reste,c.cur)}</span></button>`).join("")}</div></section>`:""}`;
@@ -301,11 +306,11 @@ function vAccueilCotis(){
 function vCotis(){
   const R = membres.map(m=>({m,c:calc(m)})).filter(({c})=> fC==="tous" || (fC==="late"&&c.actif&&!c.ok) || (fC==="ok"&&c.actif&&c.ok));
   const chip = (k,l) => `<button class="chip" aria-pressed="${fC===k}" data-fc="${k}">${l}</button>`;
-  return `<div class="tools">${chip("tous","Tous")}${chip("late","En retard")}${chip("ok","À jour")}</div>
-  <p class="note">${isAdmin?"Touchez un membre pour saisir ses versements.":"Touchez un membre pour voir le détail."} Vert : payé · orange : partiel · rose : mois échu impayé.</p>
-  <div class="list">${R.length ? R.map(({m,c})=>`<button class="row" data-act="pay" data-id="${m.id}" style="flex-wrap:wrap"><span class="who"><b>${esc(fullName(m))}</b><small>${esc(m.categorie||"")} · ${money(c.t,c.cur)} / mois · versé ${money(c.verse,c.cur)}</small></span>
+  return `${membres.length ? vResume() : ""}<h2 class="sec-t">Détail par membre</h2><div class="tools">${chip("tous","Tous")}${chip("late","En retard")}${chip("ok","À jour")}</div>
+  <p class="note">${isAdmin?"Touchez un membre pour saisir ses versements.":"Touchez un membre pour voir le détail."} Vert : payé · orange : partiel · rose : mois dû impayé · contour rose : payé en retard.</p>
+  <div class="list">${R.length ? R.map(({m,c})=>`<button class="row" data-act="pay" data-id="${m.id}" style="flex-wrap:wrap"><span class="who"><b>${esc(fullName(m))}</b><small>${esc(m.categorie||"")} · ${money(c.t,c.cur)} / mois · versé ${money(c.verse,c.cur)}${c.nRet?` · <span style="color:var(--p)">${c.nRet} paiement${c.nRet>1?"s":""} en retard</span>`:""}</small></span>
     <span class="amt">${!c.actif?`<span class="tag t-off">Inactif</span>`:c.ok?`<span class="tag t-ok">À jour</span>`:`<span class="tag t-late">${money(c.reste,c.cur)}</span>`}</span>
-    <span class="stamps" style="width:100%">${c.st.map((s,i)=>`<i class="${s?"s-"+s:""}">${INI[i]}</i>`).join("")}</span></button>`).join("") : `<div class="card empty">${membres.length?"Personne dans ce filtre.":"Aucun membre pour l'instant."}</div>`}</div>`;
+    <span class="stamps" style="width:100%">${c.st.map((s,i)=>`<i class="${s?"s-"+s:""}${c.rt[i]?" s-ret":""}" title="${MOIS[i]}${c.rt[i]?" : payé en retard":""}">${INI[i]}</i>`).join("")}</span></button>`).join("") : `<div class="card empty">${membres.length?"Personne dans ce filtre.":"Aucun membre pour l'instant."}</div>`}</div>`;
 }
 function vInscription(){
   if(sent) return `<section class="card empty"><h2>Merci !</h2><p>Votre demande d'inscription a bien été envoyée. Le bureau de Ta'Torgum Solidarity va la valider et vous contacter.</p><button class="btn sec" data-act="again">Inscrire une autre personne</button></section>`;
@@ -360,7 +365,8 @@ function vEmails(){
 }
 function vReglages(){
   const t = cfg.tarifs;
-  return `<section class="card"><h2>Tarifs mensuels</h2>
+  return `<section class="card"><h2>Présentation (page d'accueil)</h2><div class="f"><label for="pres">Texte affiché sous le logo</label><textarea id="pres" rows="5" maxlength="1200" placeholder="${esc(PRES)}">${esc(cfg.presentation)}</textarea><small class="note">Vide = texte proposé par défaut. Enregistrez avec le bouton « Enregistrer les réglages » plus bas.</small></div></section>
+  <section class="card"><h2>Tarifs mensuels</h2>
    <table class="t"><thead><tr><th>Catégorie</th><th class="r">€</th><th class="r">$</th><th class="r">FCFA</th></tr></thead><tbody>
    <tr><td>Étudiant</td><td><input id="te1" type="number" min="0" step="0.5" value="${t.etu.eur}"></td><td><input id="tu1" type="number" min="0" step="0.5" value="${t.etu.usd}"></td><td><input id="tx1" type="number" min="0" step="500" value="${t.etu.xof}"></td></tr>
    <tr><td>Non étudiant</td><td><input id="te2" type="number" min="0" step="0.5" value="${t.non.eur}"></td><td><input id="tu2" type="number" min="0" step="0.5" value="${t.non.usd}"></td><td><input id="tx2" type="number" min="0" step="500" value="${t.non.xof}"></td></tr></tbody></table>
@@ -405,7 +411,7 @@ function sheetMember(m){
   f.addEventListener("input",upd); f.addEventListener("change",upd); upd();
   f.addEventListener("submit", async e => { e.preventDefault(); const x = readForm(); if(!x.nom){ $("err").textContent = "Le nom est obligatoire."; return; }
     const id = f.dataset.id, old = membres.find(z=>z.id===id);
-    const pub = {nom:x.nom,prenom:x.prenom,pays:x.pays,categorie:x.categorie,statut:x.statut,depuis:x.depuis,pay:old?.pay||{},cree:old?.cree||Date.now()};
+    const pub = {nom:x.nom,prenom:x.prenom,pays:x.pays,categorie:x.categorie,statut:x.statut,depuis:x.depuis,pay:old?.pay||{},retard:old?.retard||{},cree:old?.cree||Date.now()};
     const priv = {tel:x.tel,email:x.email,adhesion:x.adhesion,obs:x.obs,liste:x.liste};
     try{ await api.saveMember(id||null,pub,priv); closeSheet(); toast(okMail(x.email)&&x.liste ? "Membre enregistré et ajouté à la liste de diffusion" : "Membre enregistré"); }
     catch(er){ $("err").textContent = errMsg(er); } });
@@ -418,15 +424,16 @@ function sheetPay(m){
   const c = calc(m), p = pays(m).slice(), M = moisEcoules();
   if(!isAdmin){
     openSheet(`<h2>${esc(fullName(m))}</h2><p class="note">${esc(m.categorie||"")} · ${money(c.t,c.cur)} par mois · ${year}</p>
-    <table class="t ro"><tbody>${MOIS.map((mo,i)=>`<tr><td>${mo}</td><td class="r">${p[i]==null||p[i]===""?"—":money(Number(p[i]),c.cur)}</td><td class="r">${c.st[i]?`<span class="tag ${c.st[i]==="ok"?"t-ok":c.st[i]==="late"?"t-late":"t-off"}">${c.st[i]==="ok"?"payé":c.st[i]==="late"?"impayé":"partiel"}</span>`:""}</td></tr>`).join("")}</tbody></table>
+    <table class="t ro"><tbody>${MOIS.map((mo,i)=>`<tr><td>${mo}</td><td class="r">${p[i]==null||p[i]===""?"—":money(Number(p[i]),c.cur)}</td><td class="r">${c.st[i]?`<span class="tag ${c.rt[i]?"t-late":c.st[i]==="ok"?"t-ok":c.st[i]==="late"?"t-late":"t-off"}">${c.st[i]==="ok"?"payé":c.st[i]==="late"?"impayé":"partiel"}${c.rt[i]?" en retard":""}</span>`:""}</td></tr>`).join("")}</tbody></table>
     <p class="note">Total versé : ${money(c.verse,c.cur)} · dû à ce jour : ${money(c.du,c.cur)} · ${c.ok?"à jour":"reste : "+money(c.reste,c.cur)}</p>
     <div class="acts"><button class="btn sec" data-act="close">Fermer</button></div>`); return;
   }
   openSheet(`<h2>${esc(fullName(m))}</h2><p class="note">${esc(m.categorie||"")} · ${money(c.t,c.cur)} par mois · année ${year}</p>
-   <div id="pl">${MOIS.map((mo,i)=>`<div class="pm"><b>${mo}</b><input type="number" min="0" step="${c.cur==="FCFA"?500:0.5}" inputmode="decimal" data-i="${i}" value="${p[i] ?? ""}" placeholder="—"><button class="chip" type="button" data-full="${i}">Payé</button></div>`).join("")}</div>
+   <div id="pl">${MOIS.map((mo,i)=>`<div class="pm"><b title="${mo}">${MOIS_C[i]}</b><input type="number" min="0" step="${c.cur==="FCFA"?500:0.5}" inputmode="decimal" data-i="${i}" value="${p[i] ?? ""}" placeholder="—"><button class="chip" type="button" data-full="${i}">Payé</button><label class="rt"><input type="checkbox" data-rt="${i}" ${(m.retard?.[year]||[])[i]?"checked":""}>Retard</label></div>`).join("")}</div>
+   <p class="note">Cochez « Retard » quand le versement du mois est arrivé après la date prévue.</p>
    <p class="note" id="sumP"></p>
    <div class="acts"><button class="btn" data-act="savePay" data-id="${m.id}">Enregistrer</button><button class="btn sec" data-act="fillPay">Régler jusqu'à ${MOIS[Math.max(0,M-1)].toLowerCase()}</button><button class="btn sec" data-act="close">Fermer</button></div>`);
-  const sum = () => { const v = [...$("pl").querySelectorAll("input")].reduce((s,x)=>s+(Number(x.value)||0),0); $("sumP").textContent = `Total versé : ${money(v,c.cur)} · dû à ce jour : ${money(c.du,c.cur)} · reste : ${money(c.du-v,c.cur)}`; };
+  const sum = () => { const v = [...$("pl").querySelectorAll("input[type=number]")].reduce((s,x)=>s+(Number(x.value)||0),0); $("sumP").textContent = `Total versé : ${money(v,c.cur)} · dû à ce jour : ${money(c.du,c.cur)} · reste : ${money(c.du-v,c.cur)}`; };
   $("pl").addEventListener("input",sum); sum(); $("sh").dataset.t = c.t; $("sh").dataset.f = c.f;
 }
 let actImgs = [];
@@ -503,7 +510,7 @@ async function importXlsx(file){
     let n = 0;
     for(const it of list){
       const ex = membres.find(m=>(m.nom||"").toLowerCase()===it.pub.nom.toLowerCase() && (m.prenom||"").toLowerCase()===it.pub.prenom.toLowerCase());
-      const pub = {...it.pub, depuis: ex?.depuis || "", pay:{...(ex?.pay||{}), ...(it.pay?{[yr]:it.pay}:{})}, cree: ex?.cree || Date.now()+n};
+      const pub = {...it.pub, depuis: ex?.depuis || "", retard: ex?.retard || {}, pay:{...(ex?.pay||{}), ...(it.pay?{[yr]:it.pay}:{})}, cree: ex?.cree || Date.now()+n};
       const priv = {...it.priv, liste: ex ? ex.liste !== false : true};
       await api.saveMember(ex?.id||null, pub, priv); n++; msg.textContent = `Import… ${n}/${list.length}`;
     }
@@ -515,8 +522,8 @@ async function exportXlsx(){
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Nom","Prénom","Catégorie","Statut","Pays de résidence","N° international","E-mail","Liste de diffusion","Date d'adhésion","Devise","Cotisation mensuelle","Observations"]]
       .concat(membres.map(m=>[m.nom,m.prenom,m.categorie,m.statut,m.pays,intl(m),m.email,m.liste===false?"non":"oui",m.adhesion,devise(m),tarif(m),m.obs]))), "Membres");
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Membre","Catégorie","Devise","Cotisation",...MOIS_C,"Total versé","Dû à ce jour","Reste","Situation","Versé (FCFA)","Reste (FCFA)"]]
-      .concat(membres.map(m=>{const c=calc(m);return [fullName(m),m.categorie,c.cur,c.t,...pays(m).map(v=>v??""),c.verse,c.du,c.reste,!c.actif?"Inactif":c.ok?"À jour":"En retard",Math.round(toX(c.verse,c.cur)),Math.round(toX(c.reste,c.cur))]}))), "Cotisations " + year);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Membre","Catégorie","Devise","Cotisation",...MOIS_C,"Total versé","Dû à ce jour","Reste","Situation","Mois payés en retard","Versé (FCFA)","Reste (FCFA)"]]
+      .concat(membres.map(m=>{const c=calc(m);return [fullName(m),m.categorie,c.cur,c.t,...pays(m).map(v=>v??""),c.verse,c.du,c.reste,!c.actif?"Inactif":c.ok?"À jour":"En retard",c.rt.map((x,i)=>x?MOIS_C[i]:"").filter(Boolean).join(", "),Math.round(toX(c.verse,c.cur)),Math.round(toX(c.reste,c.cur))]}))), "Cotisations " + year);
     XLSX.writeFile(wb, `Cotisations_TaTorgum_${year}.xlsx`);
   }catch(e){ toast("Export impossible pour le moment."); }
 }
@@ -546,15 +553,15 @@ document.addEventListener("click", async e => {
   else if(a==="pay") sheetPay(m);
   else if(a==="close") closeSheet();
   else if(a==="again"){ sent = false; render(); }
-  else if(a==="fillPay"){ const M = moisEcoules(); $("pl").querySelectorAll("input").forEach((x,i)=>{ if(i<M && i>=Number($("sh").dataset.f||0) && x.value==="") x.value = $("sh").dataset.t; }); $("pl").dispatchEvent(new Event("input")); }
-  else if(a==="savePay"){ const arr = [...$("pl").querySelectorAll("input")].map(x=>x.value===""?null:Math.max(0,Number(x.value))); await api.savePay(m.id, year, arr); closeSheet(); toast("Versements enregistrés"); }
+  else if(a==="fillPay"){ const M = moisEcoules(); $("pl").querySelectorAll("input[type=number]").forEach((x,i)=>{ if(i<M && i>=Number($("sh").dataset.f||0) && x.value==="") x.value = $("sh").dataset.t; }); $("pl").dispatchEvent(new Event("input")); }
+  else if(a==="savePay"){ const arr = [...$("pl").querySelectorAll("input[type=number]")].map(x=>x.value===""?null:Math.max(0,Number(x.value))); const ret = [...$("pl").querySelectorAll("[data-rt]")].map(x=>x.checked); await api.savePay(m.id, year, arr, ret); closeSheet(); toast("Versements enregistrés"); }
   else if(a==="delM"){ if(b.dataset.sure){ await api.delMember(m.id); closeSheet(); toast("Membre supprimé"); } else { b.dataset.sure = 1; b.textContent = "Confirmer la suppression"; } }
   else if(a==="okI"){ const d = inscr.find(x=>x.id===b.dataset.id); b.disabled = true;
     const pub = {nom:d.nom,prenom:d.prenom,pays:d.pays,categorie:d.categorie,statut:"Actif",depuis:nowIso().slice(0,7),pay:{},cree:Date.now()}, priv = {tel:d.tel||"",email:d.email||"",adhesion:new Date().toISOString().slice(0,10),obs:d.message||"",liste:true};
     await api.saveMember(null,pub,priv); await api.delInscr(d.id); toast("Inscription validée"); if(okMail(d.email)) sheetWelcome({...pub,...priv}); }
   else if(a==="noI"){ if(b.dataset.sure){ await api.delInscr(b.dataset.id); toast("Demande refusée"); } else { b.dataset.sure = 1; b.textContent = "Confirmer le refus"; } }
   else if(a==="saveCfg"){ const n = id => Math.max(0,Number($(id).value)||0);
-    await api.saveCfg({tarifs:{etu:{eur:n("te1"),usd:n("tu1"),xof:n("tx1")},non:{eur:n("te2"),usd:n("tu2"),xof:n("tx2")}},tauxUSD:n("tx"), debut:$("deb").value || ""}); toast("Réglages enregistrés"); }
+    await api.saveCfg({tarifs:{etu:{eur:n("te1"),usd:n("tu1"),xof:n("tx1")},non:{eur:n("te2"),usd:n("tu2"),xof:n("tx2")}},tauxUSD:n("tx"), debut:$("deb").value || "", presentation:$("pres").value.trim()}); toast("Réglages enregistrés"); }
   else if(a==="saveTpl"){ await api.saveTpl({sujet:mail.sujet,corps:mail.corps}); toast("Modèle enregistré"); }
   else if(a==="mailto"||a==="gmail"){ const L = membres.filter(x=>okMail(x.email)), dest = mail.mode==="liste" ? L.filter(x=>x.liste!==false) : L.filter(x=>mail.sel.has(x.id)); const p = mailParts(dest);
     if(a==="gmail") window.open(p.gmail,"_blank","noopener"); else location.href = p.mailto; }
@@ -629,7 +636,7 @@ function demoApi(){
     start(){ loaded = true; up(); },
     saveMember: async (i,pub,priv) => { const k = i || id(); const r = raw.find(x=>x.id===k); if(r) Object.assign(r,pub); else raw.push({...pub,id:k}); contacts[k] = {...priv}; up(); return k; },
     delMember: async i => { raw = raw.filter(x=>x.id!==i); delete contacts[i]; up(); },
-    savePay: async (i,y,arr) => { const r = raw.find(x=>x.id===i); r.pay = {...(r.pay||{}),[y]:arr}; up(); },
+    savePay: async (i,y,arr,ret) => { const r = raw.find(x=>x.id===i); r.pay = {...(r.pay||{}),[y]:arr}; r.retard = {...(r.retard||{}),[y]:ret||[]}; up(); },
     saveCfg: async c => { cfgFrom(c); up(); }, saveTpl: async t => { tpl = t; },
     setListe: async (i,v) => { contacts[i] = {...(contacts[i]||{}),liste:v}; up(); },
     addInscr: async (d,k) => { if(inscr.some(x=>x.id===k)) throw {code:"permission-denied"}; inscr.push({...d,id:k||id()}); },
@@ -676,7 +683,7 @@ async function firebaseApi(){
     delMember: async id => { const b = F.writeBatch(fs); (await keysOf({...(contacts[id]||{}), pays:(raw.find(r=>r.id===id)||{}).pays})).forEach(k=>b.delete(F.doc(fs,"cles",k)));
       b.delete(F.doc(fs,"contacts",id)); b.delete(F.doc(fs,"membres",id)); await b.commit(); },
     hasKey: async k => (await F.getDoc(F.doc(fs,"cles",k))).exists(),
-    savePay: (id,y,arr) => F.updateDoc(F.doc(fs,"membres",id), {["pay."+y]:arr}),
+    savePay: (id,y,arr,ret) => F.updateDoc(F.doc(fs,"membres",id), {["pay."+y]:arr, ["retard."+y]:ret||[]}),
     saveCfg: c => F.setDoc(F.doc(fs,"settings","main"), c),
     saveTpl: t => F.setDoc(F.doc(fs,"settings","mail"), t),
     setListe: (id,v) => F.setDoc(F.doc(fs,"contacts",id), {liste:v}, {merge:true}),
