@@ -119,6 +119,8 @@ table.t{width:100%;border-collapse:collapse;font-size:15px}.t td,.t th{padding:8
 .cal span{display:block;font:800 24px/1.2 "Baloo 2",sans-serif;padding:2px 0}
 .sec-t{font-size:19px;margin:18px 2px 10px}
 input[type=file].search{flex:none;min-height:46px}
+.vid{position:relative;aspect-ratio:16/9;background:#000;margin-top:10px;border-radius:12px;overflow:hidden}.vid.short{aspect-ratio:9/16;max-height:560px;max-width:320px;margin-left:auto;margin-right:auto}
+.vid iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:8px}
 .thumbs div{position:relative}.thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block}
 .thumbs button{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-weight:800}
@@ -236,6 +238,13 @@ const nowIso = () => new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toI
 const upcoming = () => actus.filter(a=>a.type==="activite" && a.quand && a.quand >= nowIso().slice(0,10)).sort((a,b)=>a.quand.localeCompare(b.quand));
 const fil = () => { const up = new Set(upcoming()); return actus.filter(a=>!up.has(a)).sort((a,b)=>(b.quand||new Date(b.date||0).toISOString()).localeCompare(a.quand||new Date(a.date||0).toISOString())); };
 const fmtQuand = q => { const d = new Date(q); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}) + (q.length>10 && q.slice(11,16)!=="00:00" ? " à " + q.slice(11,16).replace(":","h") : ""); };
+function vidEmbed(u){
+  let m; u = String(u||"").trim(); if(!/^https?:\/\//i.test(u)) return "";
+  if((m = u.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/i))) { const short = /shorts\//i.test(u);
+    return `<div class="vid${short?" short":""}"><iframe src="https://www.youtube-nocookie.com/embed/${m[1]}" title="Vidéo" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe></div>`; }
+  if((m = u.match(/vimeo\.com\/(?:video\/)?(\d+)/i))) return `<div class="vid"><iframe src="https://player.vimeo.com/video/${m[1]}" title="Vidéo" loading="lazy" allow="fullscreen; picture-in-picture" allowfullscreen></iframe></div>`;
+  return `<div class="acts"><a class="btn blue" href="${esc(u)}" target="_blank" rel="noopener" style="display:grid;place-items:center">Voir la vidéo</a></div>`;
+}
 function postHtml(a, compact, kicker){
   const isAct = a.type==="activite", d = a.quand ? new Date(a.quand) : null;
   const ph = photos[a.id], list = ph && ph.length ? ph.map(x=>x.data) : (a.cover ? [a.cover] : a.image ? [a.image] : []), n = Math.max(a.nPhotos||0, list.length);
@@ -245,6 +254,7 @@ function postHtml(a, compact, kicker){
     ${isAct && d ? `<div class="when"><div class="cal"><b>${d.toLocaleDateString("fr-FR",{month:"short"}).replace(".","")}</b><span>${d.getDate()}</span></div><div><span class="tag t-non">Activité</span><h3>${esc(a.titre)}</h3><div class="meta">${esc(fmtQuand(a.quand))}${a.lieu?" · "+esc(a.lieu):""}</div></div></div>`
                  : `<span class="tag t-etu">Actualité</span><h3>${esc(a.titre)}</h3><div class="meta">Publié le ${new Date(a.date||Date.now()).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>`}
     ${a.texte ? `<p>${esc(compact && a.texte.length>220 ? a.texte.slice(0,220)+"…" : a.texte)}</p>` : ""}
+    ${(a.videos||[]).length ? (compact ? `<div class="meta" style="margin-top:8px">▶ ${a.videos.length} vidéo${a.videos.length>1?"s":""}</div>` : a.videos.map(vidEmbed).join("")) : ""}
     ${compact ? `<div class="acts"><a class="btn sec" href="#actus" style="display:grid;place-items:center">Voir les actus</a></div>` : isAdmin ? `<div class="acts"><button class="btn sec" data-act="editA" data-id="${a.id}">Modifier</button><button class="btn blue" data-act="mailA" data-id="${a.id}">Envoyer à la liste</button></div>` : ""}
   </div></article>`;
 }
@@ -427,6 +437,7 @@ async function sheetActu(a){
    <div class="f"><label for="aT">Titre <span class="req">*</span></label><input id="aT" maxlength="120" value="${esc(a.titre)}"></div>
    <div id="aEv" ${a.type==="activite"?"":"hidden"}><div class="two"><div class="f"><label for="aQ">Date et heure</label><input id="aQ" type="datetime-local" value="${esc(a.quand)}"></div><div class="f"><label for="aL">Lieu</label><input id="aL" maxlength="120" value="${esc(a.lieu)}" placeholder="ex. Lomé, en ligne…"></div></div></div>
    <div class="f"><label for="aX">Texte</label><textarea id="aX" rows="6" maxlength="5000">${esc(a.texte)}</textarea></div>
+   <div class="f"><label for="aV">Vidéos (liens YouTube ou Vimeo, un par ligne)</label><textarea id="aV" rows="2" placeholder="https://youtu.be/…">${esc((a.videos||[]).join("\n"))}</textarea><small class="note">Publiez d'abord la vidéo sur YouTube (en « Non répertoriée » si vous ne voulez pas qu'elle apparaisse dans les recherches), puis collez son lien ici.</small></div>
    <div class="f"><label for="aI">Photos (jusqu'à 10)</label><input id="aI" type="file" accept="image/*" multiple class="search" style="padding:10px"><small class="note" id="aCnt"></small><div class="thumbs" id="aPrev"></div></div>
    <p class="note" id="aErr" style="color:var(--p)"></p>
    <div class="acts"><button class="btn" type="submit">Publier</button><button class="btn sec" type="button" data-act="close">Fermer</button>${a.id?`<button class="btn dang" type="button" data-act="delA" data-id="${a.id}">Supprimer</button>`:""}</div></form>`);
@@ -568,7 +579,7 @@ document.addEventListener("submit", async e => {
     const btn = f.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Publication…";
     try{
       const cover = actImgs.length ? await compress(actImgs[0].data, 640, 0.6, 70000) : "";
-      const d = {type, titre, texte:$("aX").value.trim(), quand: type==="activite" ? $("aQ").value : "", lieu: type==="activite" ? $("aL").value.trim() : "", cover, nPhotos: actImgs.length, date: Number(f.dataset.date) || Date.now()};
+      const d = {type, titre, texte:$("aX").value.trim(), quand: type==="activite" ? $("aQ").value : "", lieu: type==="activite" ? $("aL").value.trim() : "", cover, nPhotos: actImgs.length, videos: $("aV").value.split(/\s+/).map(x=>x.trim()).filter(x=>/^https?:\/\//i.test(x)).slice(0,5), date: Number(f.dataset.date) || Date.now()};
       const id = await api.saveActu(f.dataset.id || null, d, actImgs); delete photos[id]; closeSheet(); toast("Publié"); if(location.hash!=="#actus") location.hash = "actus"; else render(); }
     catch(er){ $("aErr").textContent = /size|large|exceed/i.test(String(er?.message)) ? "La photo est trop lourde. Essayez-en une autre." : errMsg(er); btn.disabled = false; btn.textContent = "Publier"; }
   }
