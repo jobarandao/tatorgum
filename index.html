@@ -152,6 +152,10 @@ const nf0 = new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0});
 const esc = s => String(s ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $ = id => document.getElementById(id);
 const okMail = e => /^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/.test((e||"").trim());
+const norm = t => (t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+async function sha(t){ const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join(""); }
+async function keysOf(c){ const k = []; const e = (c.email||"").trim().toLowerCase(); if(okMail(e)) k.push(await sha("e:"+e)); const t = intl(c).replace(/\D/g,""); if(t.length>=8) k.push(await sha("t:"+t)); return k; }
+const sameName = (a,b) => { const n1 = norm(a.nom), n2 = norm(b.nom); if(!n1 || n1!==n2) return false; const p1 = norm(a.prenom).split(" ").filter(Boolean), p2 = norm(b.prenom).split(" ").filter(Boolean); return p1.length>0 && p2.length>0 && (p1.some(x=>p2.includes(x))); };
 
 let api = null, isAdmin = false, userMail = "", loaded = false, slow = false, pendingR = false;
 let cfg = structuredClone(DEF), tpl = {...TPL}, raw = [], contacts = {}, membres = [], inscr = [], actus = [];
@@ -529,8 +533,15 @@ document.addEventListener("submit", async e => {
     const d = {nom:$("iNom").value.trim(),prenom:$("iPre").value.trim(),categorie:f.querySelector("[aria-pressed=true]")?.dataset.v||"Étudiant",pays:$("iPays").value,tel:$("iTel").value.trim(),email:$("iMail").value.trim(),message:$("iMsg").value.trim(),consent:true};
     const err = !d.nom||!d.prenom ? "Indiquez votre nom et votre prénom." : !okMail(d.email) ? "Indiquez une adresse e-mail valide." : !$("iOk").checked ? "Cochez la case d'accord pour envoyer votre demande." : d.nom.length>80||d.prenom.length>80||d.tel.length>40 ? "Un champ est trop long." : "";
     if(err){ $("iErr").textContent = err; return; }
-    const btn = f.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Envoi…";
-    try{ await api.addInscr(d); sent = true; render(); }catch(er){ $("iErr").textContent = "Envoi impossible. Vérifiez votre connexion et réessayez."; btn.disabled = false; btn.textContent = "Envoyer ma demande"; }
+    const btn = f.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Vérification…";
+    const stop = t => { $("iErr").textContent = t; btn.disabled = false; btn.textContent = "Envoyer ma demande"; };
+    try{
+      if(membres.some(m=>sameName(m,d))) return stop("Une personne portant ce nom est déjà membre de l'association. Si c'est vous, inutile de vous réinscrire. Sinon, écrivez au bureau.");
+      const keys = await keysOf(d);
+      for(const k of keys){ if(await api.hasKey(k)) return stop(k===keys[0] && okMail(d.email) ? "Cette adresse e-mail est déjà enregistrée : vous êtes déjà membre." : "Ce numéro de téléphone est déjà enregistré : vous êtes déjà membre."); }
+      btn.textContent = "Envoi…";
+      await api.addInscr(d, keys[0]); sent = true; render();
+    }catch(er){ stop(/permission|insufficient/i.test(String(er?.code||er?.message)) ? "Une demande avec cette adresse e-mail est déjà en attente de validation par le bureau." : "Envoi impossible. Vérifiez votre connexion et réessayez."); }
   }
   if(f.id==="fa"){ e.preventDefault();
     const type = f.querySelector("[data-seg=atype] [aria-pressed=true]")?.dataset.v || "actu", titre = $("aT").value.trim();
@@ -575,7 +586,8 @@ function demoApi(){
     savePay: async (i,y,arr) => { const r = raw.find(x=>x.id===i); r.pay = {...(r.pay||{}),[y]:arr}; up(); },
     saveCfg: async c => { cfgFrom(c); up(); }, saveTpl: async t => { tpl = t; },
     setListe: async (i,v) => { contacts[i] = {...(contacts[i]||{}),liste:v}; up(); },
-    addInscr: async d => { inscr.push({...d,id:id()}); },
+    addInscr: async (d,k) => { if(inscr.some(x=>x.id===k)) throw {code:"permission-denied"}; inscr.push({...d,id:k||id()}); },
+    hasKey: async k => { for(const c of Object.values(contacts)){ if((await keysOf({...c,pays:raw.find(r=>contacts[r.id]===c)?.pays})).includes(k)) return true; } return false; },
     saveActu: async (i,d) => { if(i){ Object.assign(actus.find(x=>x.id===i), d); } else actus.push({...d,id:id()}); up(); },
     delActu: async i => { actus = actus.filter(x=>x.id!==i); up(); }, delInscr: async i => { inscr = inscr.filter(x=>x.id!==i); up(); },
     login: async em => { isAdmin = true; userMail = em; location.hash = "accueil"; route(); }, logout: async () => { isAdmin = false; userMail = ""; route(); }, reset: async () => {}
@@ -590,7 +602,10 @@ async function firebaseApi(){
   const done = () => { if(gotM && gotC){ loaded = true; slow = false; } merge(); renderSoft(); };
   const stopAdmin = () => { adminUnsubs.forEach(u=>u()); adminUnsubs = []; contacts = {}; inscr = []; };
   const startAdmin = () => {
-    adminUnsubs.push(F.onSnapshot(F.collection(fs,"contacts"), s => { contacts = Object.fromEntries(s.docs.map(d=>[d.id,d.data()])); merge(); renderSoft(); }, ()=>{}));
+    let synced = false;
+    adminUnsubs.push(F.onSnapshot(F.collection(fs,"contacts"), async s => { contacts = Object.fromEntries(s.docs.map(d=>[d.id,d.data()])); merge(); renderSoft();
+      if(!synced && !s.metadata.fromCache && raw.length){ synced = true; try{ const flag = await F.getDoc(F.doc(fs,"settings","cles")); if(!flag.exists()){ const b = F.writeBatch(fs);
+        for(const r of raw){ for(const k of await keysOf({...(contacts[r.id]||{}), pays:r.pays})) b.set(F.doc(fs,"cles",k),{m:r.id}); } b.set(F.doc(fs,"settings","cles"),{v:1}); await b.commit(); } }catch(_){} } }, ()=>{}));
     adminUnsubs.push(F.onSnapshot(F.query(F.collection(fs,"inscriptions"), F.orderBy("date","desc")), s => { inscr = s.docs.map(d=>({...d.data(),id:d.id})); renderSoft(); }, ()=>{}));
   };
   return {
@@ -607,15 +622,20 @@ async function firebaseApi(){
         merge(); route();
       });
     },
-    saveMember: async (id,pub,priv) => { const ref = id ? F.doc(fs,"membres",id) : F.doc(F.collection(fs,"membres")); const b = F.writeBatch(fs); b.set(ref,pub); b.set(F.doc(fs,"contacts",ref.id),priv); await b.commit(); return ref.id; },
-    delMember: async id => { const b = F.writeBatch(fs); b.delete(F.doc(fs,"contacts",id)); b.delete(F.doc(fs,"membres",id)); await b.commit(); },
+    saveMember: async (id,pub,priv) => { const ref = id ? F.doc(fs,"membres",id) : F.doc(F.collection(fs,"membres")); const b = F.writeBatch(fs);
+      const old = id ? await keysOf({...(contacts[id]||{}), pays:(raw.find(r=>r.id===id)||{}).pays}) : [], neu = await keysOf({...priv, pays:pub.pays});
+      old.filter(k=>!neu.includes(k)).forEach(k=>b.delete(F.doc(fs,"cles",k))); neu.forEach(k=>b.set(F.doc(fs,"cles",k),{m:ref.id}));
+      b.set(ref,pub); b.set(F.doc(fs,"contacts",ref.id),priv); await b.commit(); return ref.id; },
+    delMember: async id => { const b = F.writeBatch(fs); (await keysOf({...(contacts[id]||{}), pays:(raw.find(r=>r.id===id)||{}).pays})).forEach(k=>b.delete(F.doc(fs,"cles",k)));
+      b.delete(F.doc(fs,"contacts",id)); b.delete(F.doc(fs,"membres",id)); await b.commit(); },
+    hasKey: async k => (await F.getDoc(F.doc(fs,"cles",k))).exists(),
     savePay: (id,y,arr) => F.updateDoc(F.doc(fs,"membres",id), {["pay."+y]:arr}),
     saveCfg: c => F.setDoc(F.doc(fs,"settings","main"), c),
     saveTpl: t => F.setDoc(F.doc(fs,"settings","mail"), t),
     setListe: (id,v) => F.setDoc(F.doc(fs,"contacts",id), {liste:v}, {merge:true}),
     saveActu: (id,d) => id ? F.setDoc(F.doc(fs,"actus",id), d) : F.addDoc(F.collection(fs,"actus"), d),
     delActu: id => F.deleteDoc(F.doc(fs,"actus",id)),
-    addInscr: d => F.addDoc(F.collection(fs,"inscriptions"), {...d, date:F.serverTimestamp()}),
+    addInscr: (d,k) => k ? F.setDoc(F.doc(fs,"inscriptions",k), {...d, date:F.serverTimestamp()}) : F.addDoc(F.collection(fs,"inscriptions"), {...d, date:F.serverTimestamp()}),
     delInscr: id => F.deleteDoc(F.doc(fs,"inscriptions",id)),
     login: (e,p) => U.signInWithEmailAndPassword(auth,e,p),
     logout: () => U.signOut(auth),
