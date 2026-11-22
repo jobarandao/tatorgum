@@ -118,7 +118,14 @@ table.t{width:100%;border-collapse:collapse;font-size:15px}.t td,.t th{padding:8
 .cal b{display:block;background:var(--p);color:#fff;font-size:12px;padding:2px 0;text-transform:uppercase}
 .cal span{display:block;font:800 24px/1.2 "Baloo 2",sans-serif;padding:2px 0}
 .sec-t{font-size:19px;margin:18px 2px 10px}
-.prev{max-width:100%;max-height:180px;border-radius:12px;display:block;margin-top:6px}
+input[type=file].search{flex:none;min-height:46px}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:8px}
+.thumbs div{position:relative}.thumbs img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;display:block}
+.thumbs button{position:absolute;top:4px;right:4px;width:30px;height:30px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-weight:800}
+.gwrap{position:relative;background:var(--fs)}.gal{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}.gal::-webkit-scrollbar{display:none}
+.gal img{flex:0 0 100%;width:100%;max-height:360px;object-fit:cover;scroll-snap-align:start;cursor:zoom-in}
+.gn{position:absolute;right:10px;bottom:10px;background:rgba(0,0,0,.6);color:#fff;border-radius:99px;font-size:13px;font-weight:700;padding:2px 10px;pointer-events:none}
+.lb img{width:100%;border-radius:12px;display:block;margin-bottom:10px}
 a.btn{text-decoration:none}
 </style>
 <script src="config.js"></script>
@@ -158,7 +165,7 @@ async function keysOf(c){ const k = []; const e = (c.email||"").trim().toLowerCa
 const sameName = (a,b) => { const n1 = norm(a.nom), n2 = norm(b.nom); if(!n1 || n1!==n2) return false; const p1 = norm(a.prenom).split(" ").filter(Boolean), p2 = norm(b.prenom).split(" ").filter(Boolean); return p1.length>0 && p2.length>0 && (p1.some(x=>p2.includes(x))); };
 
 let api = null, isAdmin = false, userMail = "", loaded = false, slow = false, pendingR = false;
-let cfg = structuredClone(DEF), tpl = {...TPL}, raw = [], contacts = {}, membres = [], inscr = [], actus = [];
+let cfg = structuredClone(DEF), tpl = {...TPL}, raw = [], contacts = {}, membres = [], inscr = [], actus = [], photos = {};
 let impText = "", view = "accueil", year = new Date().getFullYear(), fM = "tous", fC = "tous", q = "", sent = false;
 const mail = {mode:"liste", sel:new Set(), sujet:null, corps:null};
 
@@ -231,7 +238,10 @@ const fil = () => { const up = new Set(upcoming()); return actus.filter(a=>!up.h
 const fmtQuand = q => { const d = new Date(q); return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"}) + (q.length>10 && q.slice(11,16)!=="00:00" ? " à " + q.slice(11,16).replace(":","h") : ""); };
 function postHtml(a, compact, kicker){
   const isAct = a.type==="activite", d = a.quand ? new Date(a.quand) : null;
-  return `<article class="post">${a.image && !compact ? `<img src="${esc(a.image)}" alt="">` : ""}<div class="in">${kicker?`<div class="meta" style="color:var(--p);margin-bottom:6px">${kicker}</div>`:""}
+  const ph = photos[a.id], list = ph && ph.length ? ph.map(x=>x.data) : (a.cover ? [a.cover] : a.image ? [a.image] : []), n = Math.max(a.nPhotos||0, list.length);
+  const media = !list.length ? "" : compact ? `<div class="gwrap"><img src="${esc(list[0])}" alt="" style="display:block;width:100%;max-height:240px;object-fit:cover">${n>1?`<span class="gn">${n} photos</span>`:""}</div>`
+    : `<div class="gwrap"><div class="gal" data-gal="${a.id}">${list.map((u,i)=>`<img src="${esc(u)}" alt="Photo ${i+1}" loading="lazy" data-lb="${a.id}">`).join("")}</div>${n>1?`<span class="gn" data-gn="${a.id}">1 / ${n}</span>`:""}</div>`;
+  return `<article class="post">${media}<div class="in">${kicker?`<div class="meta" style="color:var(--p);margin-bottom:6px">${kicker}</div>`:""}
     ${isAct && d ? `<div class="when"><div class="cal"><b>${d.toLocaleDateString("fr-FR",{month:"short"}).replace(".","")}</b><span>${d.getDate()}</span></div><div><span class="tag t-non">Activité</span><h3>${esc(a.titre)}</h3><div class="meta">${esc(fmtQuand(a.quand))}${a.lieu?" · "+esc(a.lieu):""}</div></div></div>`
                  : `<span class="tag t-etu">Actualité</span><h3>${esc(a.titre)}</h3><div class="meta">Publié le ${new Date(a.date||Date.now()).toLocaleDateString("fr-FR",{day:"numeric",month:"long",year:"numeric"})}</div>`}
     ${a.texte ? `<p>${esc(compact && a.texte.length>220 ? a.texte.slice(0,220)+"…" : a.texte)}</p>` : ""}
@@ -240,6 +250,7 @@ function postHtml(a, compact, kicker){
 }
 function vActus(){
   const up = upcoming(), f = fil();
+  const need = actus.filter(a=>(a.nPhotos||0)>0 && !photos[a.id]).map(a=>a.id); if(need.length) setTimeout(()=>loadPhotos(need), 0);
   return `${isAdmin?`<div class="tools"><button class="btn" data-act="newA" style="flex:1">+ Publier une actualité ou une activité</button></div>`:""}
   ${up.length?`<h2 class="sec-t">À venir</h2>${up.map(a=>postHtml(a)).join("")}`:""}
   <h2 class="sec-t">${up.length?"Actualités":"Actualités et activités"}</h2>
@@ -401,27 +412,34 @@ function sheetPay(m){
   const sum = () => { const v = [...$("pl").querySelectorAll("input")].reduce((s,x)=>s+(Number(x.value)||0),0); $("sumP").textContent = `Total versé : ${money(v,c.cur)} · dû à ce jour : ${money(c.du,c.cur)} · reste : ${money(c.du-v,c.cur)}`; };
   $("pl").addEventListener("input",sum); sum(); $("sh").dataset.t = c.t;
 }
-let actImg = null;
-function sheetActu(a){
-  a = a || {type:"actu"}; actImg = a.image || null;
+let actImgs = [];
+async function loadPhotos(ids){ const todo = ids.filter(id=>!photos[id] && !loadPhotos.busy.has(id)); if(!todo.length) return; todo.forEach(id=>loadPhotos.busy.add(id));
+  try{ await Promise.all(todo.map(async id=>{ photos[id] = (await api.getPhotos(id)).sort((x,y)=>x.i-y.i); })); }catch(_){} todo.forEach(id=>loadPhotos.busy.delete(id)); renderSoft(); }
+loadPhotos.busy = new Set();
+async function sheetActu(a){
+  a = a || {type:"actu"};
+  if(a.id && (a.nPhotos||0)>0 && !photos[a.id]) await loadPhotos([a.id]);
+  actImgs = a.id ? (photos[a.id] || []).map(x=>({id:x.id, data:x.data})) : [];
+  if(a.id && !actImgs.length && a.image) actImgs = [{data:a.image}];
   const seg = `<div class="seg" data-seg="atype">${[["actu","Actualité"],["activite","Activité"]].map(([k,l])=>`<button type="button" class="chip" aria-pressed="${a.type===k}" data-v="${k}">${l}</button>`).join("")}</div>`;
   openSheet(`<h2>${a.id?"Modifier la publication":"Nouvelle publication"}</h2><form id="fa" novalidate>
    <div class="f"><label>Type</label>${seg}</div>
    <div class="f"><label for="aT">Titre <span class="req">*</span></label><input id="aT" maxlength="120" value="${esc(a.titre)}"></div>
    <div id="aEv" ${a.type==="activite"?"":"hidden"}><div class="two"><div class="f"><label for="aQ">Date et heure</label><input id="aQ" type="datetime-local" value="${esc(a.quand)}"></div><div class="f"><label for="aL">Lieu</label><input id="aL" maxlength="120" value="${esc(a.lieu)}" placeholder="ex. Lomé, en ligne…"></div></div></div>
    <div class="f"><label for="aX">Texte</label><textarea id="aX" rows="6" maxlength="5000">${esc(a.texte)}</textarea></div>
-   <div class="f"><label for="aI">Photo (facultatif)</label><input id="aI" type="file" accept="image/*" class="search" style="padding:10px"><div id="aPrev">${actImg?`<img class="prev" src="${esc(actImg)}" alt=""><button type="button" class="chip" data-act="noImg" style="margin-top:6px">Retirer la photo</button>`:""}</div></div>
+   <div class="f"><label for="aI">Photos (jusqu'à 10)</label><input id="aI" type="file" accept="image/*" multiple class="search" style="padding:10px"><small class="note" id="aCnt"></small><div class="thumbs" id="aPrev"></div></div>
    <p class="note" id="aErr" style="color:var(--p)"></p>
    <div class="acts"><button class="btn" type="submit">Publier</button><button class="btn sec" type="button" data-act="close">Fermer</button>${a.id?`<button class="btn dang" type="button" data-act="delA" data-id="${a.id}">Supprimer</button>`:""}</div></form>`);
-  $("fa").dataset.id = a.id || ""; $("fa").dataset.date = a.date || "";
+  $("fa").dataset.id = a.id || ""; $("fa").dataset.date = a.date || ""; showImg();
 }
-const showImg = () => { $("aPrev").innerHTML = actImg ? `<img class="prev" src="${actImg}" alt=""><button type="button" class="chip" data-act="noImg" style="margin-top:6px">Retirer la photo</button>` : ""; };
-async function compress(file){
-  const url = URL.createObjectURL(file); const img = new Image(); img.src = url; await img.decode();
-  let w = img.naturalWidth, h = img.naturalHeight, max = 1100, q = 0.78, out = "";
-  for(let i=0;i<6;i++){ const k = Math.min(1, max/Math.max(w,h)); const c = document.createElement("canvas"); c.width = Math.round(w*k); c.height = Math.round(h*k);
-    c.getContext("2d").drawImage(img,0,0,c.width,c.height); out = c.toDataURL("image/jpeg", q); if(out.length < 450000) break; max *= 0.8; q -= 0.08; }
-  URL.revokeObjectURL(url); return out;
+const showImg = () => { $("aPrev").innerHTML = actImgs.map((x,i)=>`<div><img src="${x.data}" alt="Photo ${i+1}"><button type="button" data-rm="${i}" aria-label="Retirer la photo ${i+1}">×</button></div>`).join("");
+  $("aCnt").textContent = actImgs.length ? `${actImgs.length} photo${actImgs.length>1?"s":""} sur 10 · la première sert de couverture` : ""; };
+async function compress(src, max = 1100, q = 0.78, limit = 350000){
+  const url = typeof src === "string" ? src : URL.createObjectURL(src); const img = new Image(); img.src = url; await img.decode();
+  let w = img.naturalWidth, h = img.naturalHeight, out = "";
+  for(let i=0;i<7;i++){ const k = Math.min(1, max/Math.max(w,h)); const c = document.createElement("canvas"); c.width = Math.round(w*k); c.height = Math.round(h*k);
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height); out = c.toDataURL("image/jpeg", q); if(out.length < limit) break; max *= 0.8; q -= 0.07; }
+  if(typeof src !== "string") URL.revokeObjectURL(url); return out;
 }
 function sheetWelcome(m){
   const one = mailParts([m]);
@@ -494,11 +512,11 @@ document.addEventListener("click", async e => {
   if(b.closest("[data-seg]") && b.dataset.v){ b.parentElement.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed",x===b)); b.closest("form")?.dispatchEvent(new Event("change",{bubbles:true})); return; }
   if(b.dataset.full){ const i = $("pl").querySelector(`[data-i="${b.dataset.full}"]`); i.value = $("sh").dataset.t; i.dispatchEvent(new Event("input",{bubbles:true})); return; }
   if(b.dataset.copy){ const t = $(b.dataset.copy), old = b.textContent; try{ await navigator.clipboard.writeText(t.value); b.textContent = "Copié"; }catch(_){ t.focus(); t.select(); b.textContent = "Sélectionné : copiez-le"; } setTimeout(()=>{ b.textContent = old; },1800); return; }
+  if(b.dataset.rm){ actImgs.splice(Number(b.dataset.rm),1); showImg(); return; }
   const a = b.dataset.act, m = membres.find(x=>x.id===b.dataset.id);
   try{
   if(a==="newA") sheetActu();
   else if(a==="editA") sheetActu(actus.find(x=>x.id===b.dataset.id));
-  else if(a==="noImg"){ actImg = null; showImg(); }
   else if(a==="delA"){ if(b.dataset.sure){ await api.delActu(b.dataset.id); closeSheet(); toast("Publication supprimée"); } else { b.dataset.sure = 1; b.textContent = "Confirmer la suppression"; } }
   else if(a==="mailA"){ const x = actus.find(y=>y.id===b.dataset.id), L = membres.filter(m=>okMail(m.email) && m.liste!==false);
     if(!L.length){ toast("Aucun inscrit à la liste de diffusion."); return; }
@@ -547,9 +565,11 @@ document.addEventListener("submit", async e => {
     const type = f.querySelector("[data-seg=atype] [aria-pressed=true]")?.dataset.v || "actu", titre = $("aT").value.trim();
     if(!titre){ $("aErr").textContent = "Le titre est obligatoire."; return; }
     if(type==="activite" && !$("aQ").value){ $("aErr").textContent = "Indiquez la date de l'activité."; return; }
-    const d = {type, titre, texte:$("aX").value.trim(), quand: type==="activite" ? $("aQ").value : "", lieu: type==="activite" ? $("aL").value.trim() : "", image: actImg || "", date: Number(f.dataset.date) || Date.now()};
     const btn = f.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Publication…";
-    try{ await api.saveActu(f.dataset.id || null, d); closeSheet(); toast("Publié"); if(location.hash!=="#actus") location.hash = "actus"; }
+    try{
+      const cover = actImgs.length ? await compress(actImgs[0].data, 640, 0.6, 70000) : "";
+      const d = {type, titre, texte:$("aX").value.trim(), quand: type==="activite" ? $("aQ").value : "", lieu: type==="activite" ? $("aL").value.trim() : "", cover, nPhotos: actImgs.length, date: Number(f.dataset.date) || Date.now()};
+      const id = await api.saveActu(f.dataset.id || null, d, actImgs); delete photos[id]; closeSheet(); toast("Publié"); if(location.hash!=="#actus") location.hash = "actus"; else render(); }
     catch(er){ $("aErr").textContent = /size|large|exceed/i.test(String(er?.message)) ? "La photo est trop lourde. Essayez-en une autre." : errMsg(er); btn.disabled = false; btn.textContent = "Publier"; }
   }
   if(f.id==="fl"){ e.preventDefault(); const em = $("lMail").value.trim(), pw = $("lPwd").value;
@@ -565,17 +585,25 @@ const updTarif = () => { const el = $("iTarif"); if(!el) return; const x = {pays
 document.addEventListener("change", async e => { const t = e.target;
   if(t.closest?.("#fi")) updTarif();
   if(t.id==="fa"){ const ty = t.querySelector("[data-seg=atype] [aria-pressed=true]")?.dataset.v; $("aEv").hidden = ty!=="activite"; }
-  if(t.id==="aI" && t.files[0]){ try{ actImg = await compress(t.files[0]); showImg(); }catch(_){ $("aErr").textContent = "Image illisible. Essayez une photo JPEG ou PNG."; } }
+  if(t.id==="aI" && t.files.length){ const files = [...t.files].slice(0, 10 - actImgs.length); $("aErr").textContent = t.files.length > files.length ? "10 photos maximum : les suivantes sont ignorées." : "";
+    $("aCnt").textContent = "Préparation des photos…";
+    for(const f of files){ try{ actImgs.push({data: await compress(f)}); }catch(_){ $("aErr").textContent = "Une image est illisible. Essayez des photos JPEG ou PNG."; } }
+    t.value = ""; showImg(); }
   if(t.id==="xlsIn" && t.files[0]) importXlsx(t.files[0]);
   if(t.dataset.sel){ t.checked ? mail.sel.add(t.dataset.sel) : mail.sel.delete(t.dataset.sel); render(); }
   if(t.dataset.liste){ try{ await api.setListe(t.dataset.liste, t.checked); toast(t.checked ? "Ajouté à la liste" : "Retiré de la liste"); }catch(er){ t.checked = !t.checked; toast(errMsg(er)); } } });
 $("ov").addEventListener("click", e => { if(e.target.id==="ov") closeSheet(); });
+document.addEventListener("click", e => { const im = e.target.closest("[data-lb]"); if(!im) return; const id = im.dataset.lb, a = actus.find(x=>x.id===id), ls = (photos[id]||[]).map(x=>x.data);
+  openSheet(`<h2>${esc(a?.titre||"Photos")}</h2><div class="lb">${(ls.length?ls:[im.src]).map((u,i)=>`<img src="${u}" alt="Photo ${i+1}">`).join("")}</div><div class="acts"><button class="btn sec" data-act="close">Fermer</button></div>`);
+  const k = [...im.parentElement.children].indexOf(im); setTimeout(()=>$("sh").querySelectorAll(".lb img")[k]?.scrollIntoView({block:"start"}), 50); });
+document.addEventListener("scroll", e => { const g = e.target; if(!g.dataset || !g.dataset.gal) return; const n = $("app").querySelector(`[data-gn="${g.dataset.gal}"]`); if(n) n.textContent = `${Math.round(g.scrollLeft/g.clientWidth)+1} / ${g.children.length}`; }, true);
 document.addEventListener("keydown", e => { if(e.key==="Escape") closeSheet(); });
 $("yPrev").onclick = () => { year--; render(); };
 $("yNext").onclick = () => { year++; render(); };
 addEventListener("hashchange", route);
 
 /* ---------- données : démonstration ---------- */
+const demoPh = {};
 function demoApi(){
   let n = 0; const id = () => "d" + (++n) + Date.now().toString(36);
   const up = () => { merge(); renderSoft(); };
@@ -588,8 +616,9 @@ function demoApi(){
     setListe: async (i,v) => { contacts[i] = {...(contacts[i]||{}),liste:v}; up(); },
     addInscr: async (d,k) => { if(inscr.some(x=>x.id===k)) throw {code:"permission-denied"}; inscr.push({...d,id:k||id()}); },
     hasKey: async k => { for(const c of Object.values(contacts)){ if((await keysOf({...c,pays:raw.find(r=>contacts[r.id]===c)?.pays})).includes(k)) return true; } return false; },
-    saveActu: async (i,d) => { if(i){ Object.assign(actus.find(x=>x.id===i), d); } else actus.push({...d,id:id()}); up(); },
-    delActu: async i => { actus = actus.filter(x=>x.id!==i); up(); }, delInscr: async i => { inscr = inscr.filter(x=>x.id!==i); up(); },
+    saveActu: async (i,d,imgs) => { const k = i || id(); if(i){ Object.assign(actus.find(x=>x.id===i), d); } else actus.push({...d,id:k}); demoPh[k] = imgs.map((x,j)=>({id:x.id||id(),i:j,data:x.data})); up(); return k; },
+    delActu: async i => { actus = actus.filter(x=>x.id!==i); delete demoPh[i]; up(); },
+    getPhotos: async i => (demoPh[i]||[]).map(x=>({...x})), delInscr: async i => { inscr = inscr.filter(x=>x.id!==i); up(); },
     login: async em => { isAdmin = true; userMail = em; location.hash = "accueil"; route(); }, logout: async () => { isAdmin = false; userMail = ""; route(); }, reset: async () => {}
   };
 }
@@ -633,8 +662,13 @@ async function firebaseApi(){
     saveCfg: c => F.setDoc(F.doc(fs,"settings","main"), c),
     saveTpl: t => F.setDoc(F.doc(fs,"settings","mail"), t),
     setListe: (id,v) => F.setDoc(F.doc(fs,"contacts",id), {liste:v}, {merge:true}),
-    saveActu: (id,d) => id ? F.setDoc(F.doc(fs,"actus",id), d) : F.addDoc(F.collection(fs,"actus"), d),
-    delActu: id => F.deleteDoc(F.doc(fs,"actus",id)),
+    getPhotos: async id => (await F.getDocs(F.query(F.collection(fs,"photos"), F.where("actu","==",id)))).docs.map(x=>({...x.data(), id:x.id})),
+    saveActu: async (id,d,imgs) => { const ref = id ? F.doc(fs,"actus",id) : F.doc(F.collection(fs,"actus")); const old = id ? (await F.getDocs(F.query(F.collection(fs,"photos"), F.where("actu","==",id)))).docs.map(x=>x.id) : [];
+      const keep = new Set(imgs.filter(x=>x.id).map(x=>x.id)); const b = F.writeBatch(fs);
+      old.filter(k=>!keep.has(k)).forEach(k=>b.delete(F.doc(fs,"photos",k)));
+      imgs.forEach((x,i) => x.id ? b.update(F.doc(fs,"photos",x.id),{i}) : b.set(F.doc(F.collection(fs,"photos")),{actu:ref.id,i,data:x.data}));
+      const {image, ...rest} = d; b.set(ref, rest); await b.commit(); return ref.id; },
+    delActu: async id => { const b = F.writeBatch(fs); (await F.getDocs(F.query(F.collection(fs,"photos"), F.where("actu","==",id)))).docs.forEach(x=>b.delete(x.ref)); b.delete(F.doc(fs,"actus",id)); await b.commit(); },
     addInscr: (d,k) => k ? F.setDoc(F.doc(fs,"inscriptions",k), {...d, date:F.serverTimestamp()}) : F.addDoc(F.collection(fs,"inscriptions"), {...d, date:F.serverTimestamp()}),
     delInscr: id => F.deleteDoc(F.doc(fs,"inscriptions",id)),
     login: (e,p) => U.signInWithEmailAndPassword(auth,e,p),
